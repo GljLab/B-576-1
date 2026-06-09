@@ -2,6 +2,7 @@ package com.interview.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.interview.entity.*;
+import com.interview.entity.dto.SubmitMultiScoreDTO;
 import com.interview.mapper.*;
 import com.interview.service.ScoreService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,9 +15,6 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * 评分服务实现
- */
 @Service
 public class ScoreServiceImpl implements ScoreService {
     
@@ -35,6 +33,12 @@ public class ScoreServiceImpl implements ScoreService {
     @Autowired
     private PositionMapper positionMapper;
     
+    @Autowired
+    private ExaminerMapper examinerMapper;
+    
+    @Autowired
+    private ScoreItemMapper scoreItemMapper;
+    
     @Override
     @Transactional
     public boolean submitScore(ExaminerScore score) {
@@ -42,11 +46,11 @@ public class ScoreServiceImpl implements ScoreService {
         score.setStatus(1);
         score.setIsValid(1);
         
-        // 检查是否已存在评分记录
         ExaminerScore existing = examinerScoreMapper.selectOne(
                 new LambdaQueryWrapper<ExaminerScore>()
                         .eq(ExaminerScore::getCandidateId, score.getCandidateId())
-                        .eq(ExaminerScore::getExaminerId, score.getExaminerId()));
+                        .eq(ExaminerScore::getExaminerId, score.getExaminerId())
+                        .isNull(ExaminerScore::getScoreItemId));
         
         if (existing != null) {
             score.setId(existing.getId());
@@ -56,8 +60,89 @@ public class ScoreServiceImpl implements ScoreService {
         return examinerScoreMapper.insert(score) > 0;
     }
     
-    @Autowired
-    private ExaminerMapper examinerMapper;
+    @Override
+    @Transactional
+    public boolean submitMultiScore(SubmitMultiScoreDTO dto) {
+        if (dto.getItemScores() == null || dto.getItemScores().isEmpty()) {
+            return false;
+        }
+        
+        List<ScoreItem> projectItems = scoreItemMapper.selectList(
+                new LambdaQueryWrapper<ScoreItem>()
+                        .eq(ScoreItem::getProjectId, dto.getProjectId())
+                        .eq(ScoreItem::getStatus, 1));
+        Map<Long, ScoreItem> itemMap = projectItems.stream()
+                .collect(Collectors.toMap(ScoreItem::getId, item -> item));
+        
+        BigDecimal totalWeightedScore = BigDecimal.ZERO;
+        
+        for (SubmitMultiScoreDTO.ScoreItemDetail detail : dto.getItemScores()) {
+            ScoreItem item = itemMap.get(detail.getScoreItemId());
+            if (item == null || detail.getScore() == null) {
+                continue;
+            }
+            
+            if (detail.getScore().compareTo(BigDecimal.ZERO) < 0 
+                    || detail.getScore().compareTo(item.getMaxScore()) > 0) {
+                throw new IllegalArgumentException("评分项 " + item.getItemName() + " 分数超出范围");
+            }
+            
+            BigDecimal weighted = detail.getScore()
+                    .multiply(item.getWeight())
+                    .divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP);
+            totalWeightedScore = totalWeightedScore.add(weighted);
+            
+            ExaminerScore es = new ExaminerScore();
+            es.setProjectId(dto.getProjectId());
+            es.setCandidateId(dto.getCandidateId());
+            es.setExaminerId(dto.getExaminerId());
+            es.setRoomId(dto.getRoomId());
+            es.setScoreItemId(detail.getScoreItemId());
+            es.setScore(detail.getScore());
+            es.setWeightedScore(weighted.setScale(2, RoundingMode.HALF_UP));
+            es.setSubmitTime(LocalDateTime.now());
+            es.setStatus(1);
+            es.setIsValid(1);
+            
+            ExaminerScore existing = examinerScoreMapper.selectOne(
+                    new LambdaQueryWrapper<ExaminerScore>()
+                            .eq(ExaminerScore::getCandidateId, dto.getCandidateId())
+                            .eq(ExaminerScore::getExaminerId, dto.getExaminerId())
+                            .eq(ExaminerScore::getScoreItemId, detail.getScoreItemId()));
+            
+            if (existing != null) {
+                es.setId(existing.getId());
+                examinerScoreMapper.updateById(es);
+            } else {
+                examinerScoreMapper.insert(es);
+            }
+        }
+        
+        ExaminerScore summary = new ExaminerScore();
+        summary.setProjectId(dto.getProjectId());
+        summary.setCandidateId(dto.getCandidateId());
+        summary.setExaminerId(dto.getExaminerId());
+        summary.setRoomId(dto.getRoomId());
+        summary.setScoreItemId(null);
+        summary.setTotalScore(totalWeightedScore.setScale(2, RoundingMode.HALF_UP));
+        summary.setComment(dto.getComment());
+        summary.setSubmitTime(LocalDateTime.now());
+        summary.setStatus(1);
+        summary.setIsValid(1);
+        
+        ExaminerScore existingSummary = examinerScoreMapper.selectOne(
+                new LambdaQueryWrapper<ExaminerScore>()
+                        .eq(ExaminerScore::getCandidateId, dto.getCandidateId())
+                        .eq(ExaminerScore::getExaminerId, dto.getExaminerId())
+                        .isNull(ExaminerScore::getScoreItemId));
+        
+        if (existingSummary != null) {
+            summary.setId(existingSummary.getId());
+            return examinerScoreMapper.updateById(summary) > 0;
+        }
+        
+        return examinerScoreMapper.insert(summary) > 0;
+    }
     
     @Override
     public List<Map<String, Object>> getCandidateScores(Long candidateId) {
@@ -65,9 +150,9 @@ public class ScoreServiceImpl implements ScoreService {
                 new LambdaQueryWrapper<ExaminerScore>()
                         .eq(ExaminerScore::getCandidateId, candidateId)
                         .eq(ExaminerScore::getStatus, 1)
+                        .isNull(ExaminerScore::getScoreItemId)
                         .orderByAsc(ExaminerScore::getExaminerId));
         
-        // 转换为包含考官姓名的Map列表
         List<Map<String, Object>> result = new ArrayList<>();
         for (ExaminerScore score : scores) {
             Map<String, Object> item = new HashMap<>();
@@ -81,7 +166,6 @@ public class ScoreServiceImpl implements ScoreService {
             item.put("submitTime", score.getSubmitTime());
             item.put("status", score.getStatus());
             
-            // 获取考官姓名
             if (score.getExaminerId() != null) {
                 Examiner examiner = examinerMapper.selectById(score.getExaminerId());
                 if (examiner != null) {
@@ -98,29 +182,24 @@ public class ScoreServiceImpl implements ScoreService {
     @Override
     @Transactional
     public FinalScore calculateFinalScore(Long projectId, Long candidateId) {
-        // 获取项目配置
         InterviewProject project = projectMapper.selectById(projectId);
         if (project == null) {
             return null;
         }
         
-        // 获取考生信息
         Candidate candidate = candidateMapper.selectById(candidateId);
         if (candidate == null) {
             return null;
         }
         
-        // 获取所有评分
-        List<ExaminerScore> scores = getExaminerScoreList(candidateId);
+        List<ExaminerScore> scores = getExaminerSummaryScores(candidateId);
         if (scores.isEmpty()) {
             return null;
         }
         
-        // 计算面试分数
         boolean removeExtreme = project.getRemoveHighest() == 1 && project.getRemoveLowest() == 1;
         BigDecimal interviewRawScore = calculateInterviewScore(candidateId, removeExtreme);
         
-        // 计算加权成绩
         BigDecimal writtenScore = candidate.getWrittenScore() != null ? candidate.getWrittenScore() : BigDecimal.ZERO;
         BigDecimal writtenWeight = project.getWrittenWeight().divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP);
         BigDecimal interviewWeight = project.getInterviewWeight().divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP);
@@ -129,7 +208,6 @@ public class ScoreServiceImpl implements ScoreService {
         BigDecimal weightedInterview = interviewRawScore.multiply(interviewWeight);
         BigDecimal totalScore = weightedWritten.add(weightedInterview).setScale(project.getScorePrecision(), RoundingMode.HALF_UP);
         
-        // 创建或更新最终成绩
         FinalScore finalScore = finalScoreMapper.selectOne(
                 new LambdaQueryWrapper<FinalScore>()
                         .eq(FinalScore::getCandidateId, candidateId));
@@ -158,7 +236,6 @@ public class ScoreServiceImpl implements ScoreService {
     @Override
     @Transactional
     public int calculateAllScores(Long projectId) {
-        // 获取项目所有考生
         List<Candidate> candidates = candidateMapper.selectList(
                 new LambdaQueryWrapper<Candidate>()
                         .eq(Candidate::getProjectId, projectId)
@@ -173,7 +250,6 @@ public class ScoreServiceImpl implements ScoreService {
             }
         }
         
-        // 计算排名
         calculateRanking(projectId);
         
         return count;
@@ -199,7 +275,6 @@ public class ScoreServiceImpl implements ScoreService {
         
         List<FinalScore> scores = finalScoreMapper.selectList(wrapper);
         
-        // 转换为包含考生姓名和职位名称的Map列表
         List<Map<String, Object>> result = new ArrayList<>();
         for (FinalScore score : scores) {
             Map<String, Object> item = new HashMap<>();
@@ -217,7 +292,6 @@ public class ScoreServiceImpl implements ScoreService {
             item.put("publishStatus", score.getPublishStatus());
             item.put("publishTime", score.getPublishTime());
             
-            // 获取考生姓名
             if (score.getCandidateId() != null) {
                 Candidate candidate = candidateMapper.selectById(score.getCandidateId());
                 if (candidate != null) {
@@ -226,7 +300,6 @@ public class ScoreServiceImpl implements ScoreService {
                 }
             }
             
-            // 获取职位名称
             if (score.getPositionId() != null) {
                 Position position = positionMapper.selectById(score.getPositionId());
                 if (position != null) {
@@ -261,7 +334,6 @@ public class ScoreServiceImpl implements ScoreService {
     public Map<String, Object> getScoreStatistics(Long projectId) {
         Map<String, Object> stats = new HashMap<>();
         
-        // 直接查询FinalScore列表
         List<FinalScore> scores = finalScoreMapper.selectList(
                 new LambdaQueryWrapper<FinalScore>()
                         .eq(FinalScore::getProjectId, projectId)
@@ -304,8 +376,7 @@ public class ScoreServiceImpl implements ScoreService {
     
     @Override
     public BigDecimal calculateInterviewScore(Long candidateId, boolean removeExtreme) {
-        // 直接查询ExaminerScore列表
-        List<ExaminerScore> scores = getExaminerScoreList(candidateId);
+        List<ExaminerScore> scores = getExaminerSummaryScores(candidateId);
         
         if (scores.isEmpty()) {
             return BigDecimal.ZERO;
@@ -321,40 +392,99 @@ public class ScoreServiceImpl implements ScoreService {
             return BigDecimal.ZERO;
         }
         
-        // 如果需要去掉最高最低分且评委数量大于2
         if (removeExtreme && scoreValues.size() > 2) {
-            // 标记最高最低分为无效
             markExtremeScores(candidateId, scores);
-            
-            // 去掉最高和最低分
             scoreValues = scoreValues.subList(1, scoreValues.size() - 1);
         }
         
-        // 计算平均分
         BigDecimal sum = scoreValues.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
         return sum.divide(new BigDecimal(scoreValues.size()), 2, RoundingMode.HALF_UP);
     }
     
-    /**
-     * 获取原始考官评分列表（内部使用）
-     */
-    private List<ExaminerScore> getExaminerScoreList(Long candidateId) {
+    @Override
+    public Map<String, Object> getCandidateScoreDetails(Long candidateId, Long projectId) {
+        Map<String, Object> result = new HashMap<>();
+        
+        List<ScoreItem> items = scoreItemMapper.selectList(
+                new LambdaQueryWrapper<ScoreItem>()
+                        .eq(ScoreItem::getProjectId, projectId)
+                        .eq(ScoreItem::getStatus, 1)
+                        .orderByAsc(ScoreItem::getSortOrder));
+        result.put("scoreItems", items);
+        
+        List<Examiner> examiners = examinerMapper.selectList(
+                new LambdaQueryWrapper<Examiner>()
+                        .eq(Examiner::getProjectId, projectId)
+                        .orderByAsc(Examiner::getSeatNo));
+        result.put("examiners", examiners);
+        
+        List<ExaminerScore> allScores = examinerScoreMapper.selectList(
+                new LambdaQueryWrapper<ExaminerScore>()
+                        .eq(ExaminerScore::getCandidateId, candidateId)
+                        .eq(ExaminerScore::getProjectId, projectId)
+                        .eq(ExaminerScore::getStatus, 1));
+        
+        Map<Long, ExaminerScore> summaryByExaminer = new HashMap<>();
+        Map<String, ExaminerScore> detailByExaminerItem = new HashMap<>();
+        
+        for (ExaminerScore es : allScores) {
+            if (es.getScoreItemId() == null) {
+                summaryByExaminer.put(es.getExaminerId(), es);
+            } else {
+                String key = es.getExaminerId() + "_" + es.getScoreItemId();
+                detailByExaminerItem.put(key, es);
+            }
+        }
+        
+        result.put("summaryByExaminer", summaryByExaminer);
+        result.put("detailByExaminerItem", detailByExaminerItem);
+        
+        Map<Long, BigDecimal> itemAvgScores = new HashMap<>();
+        for (ScoreItem item : items) {
+            List<BigDecimal> itemScores = new ArrayList<>();
+            for (Examiner examiner : examiners) {
+                String key = examiner.getId() + "_" + item.getId();
+                ExaminerScore es = detailByExaminerItem.get(key);
+                if (es != null && es.getScore() != null && es.getIsValid() == 1) {
+                    itemScores.add(es.getScore());
+                }
+            }
+            if (!itemScores.isEmpty()) {
+                BigDecimal sum = itemScores.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+                itemAvgScores.put(item.getId(), sum.divide(new BigDecimal(itemScores.size()), 2, RoundingMode.HALF_UP));
+            } else {
+                itemAvgScores.put(item.getId(), BigDecimal.ZERO);
+            }
+        }
+        result.put("itemAvgScores", itemAvgScores);
+        
+        List<Map<String, Object>> radarData = new ArrayList<>();
+        for (ScoreItem item : items) {
+            Map<String, Object> rd = new HashMap<>();
+            rd.put("name", item.getItemName());
+            rd.put("avg", itemAvgScores.get(item.getId()));
+            rd.put("max", item.getMaxScore());
+            radarData.add(rd);
+        }
+        result.put("radarData", radarData);
+        
+        return result;
+    }
+    
+    private List<ExaminerScore> getExaminerSummaryScores(Long candidateId) {
         return examinerScoreMapper.selectList(
                 new LambdaQueryWrapper<ExaminerScore>()
                         .eq(ExaminerScore::getCandidateId, candidateId)
                         .eq(ExaminerScore::getStatus, 1)
+                        .isNull(ExaminerScore::getScoreItemId)
                         .orderByAsc(ExaminerScore::getExaminerId));
     }
     
-    /**
-     * 标记最高最低分
-     */
     private void markExtremeScores(Long candidateId, List<ExaminerScore> scores) {
         if (scores.size() <= 2) {
             return;
         }
         
-        // 找出最高和最低分
         ExaminerScore highest = scores.stream()
                 .filter(s -> s.getTotalScore() != null)
                 .max(Comparator.comparing(ExaminerScore::getTotalScore))
@@ -365,7 +495,6 @@ public class ScoreServiceImpl implements ScoreService {
                 .min(Comparator.comparing(ExaminerScore::getTotalScore))
                 .orElse(null);
         
-        // 标记为无效
         if (highest != null) {
             highest.setIsValid(0);
             examinerScoreMapper.updateById(highest);
@@ -377,11 +506,7 @@ public class ScoreServiceImpl implements ScoreService {
         }
     }
     
-    /**
-     * 计算排名
-     */
     private void calculateRanking(Long projectId) {
-        // 总排名 - 直接查询FinalScore列表
         LambdaQueryWrapper<FinalScore> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FinalScore::getProjectId, projectId);
         wrapper.orderByDesc(FinalScore::getTotalScore);
@@ -392,7 +517,6 @@ public class ScoreServiceImpl implements ScoreService {
             finalScoreMapper.updateById(score);
         }
         
-        // 按职位排名
         Map<Long, List<FinalScore>> scoresByPosition = allScores.stream()
                 .filter(s -> s.getPositionId() != null)
                 .collect(Collectors.groupingBy(FinalScore::getPositionId));

@@ -3,6 +3,7 @@ package com.interview.controller;
 import com.interview.common.Result;
 import com.interview.entity.ExaminerScore;
 import com.interview.entity.FinalScore;
+import com.interview.entity.dto.SubmitMultiScoreDTO;
 import com.interview.service.ScoreService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,9 +15,6 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 评分控制器
- */
 @Tag(name = "评分管理", description = "考官评分、成绩计算等接口")
 @RestController
 @RequestMapping("/scores")
@@ -25,7 +23,7 @@ public class ScoreController {
     @Autowired
     private ScoreService scoreService;
     
-    @Operation(summary = "提交评分")
+    @Operation(summary = "提交单维度评分（兼容旧版）")
     @PostMapping
     public Result<Void> submitScore(@Valid @RequestBody ExaminerScore score) {
         if (scoreService.submitScore(score)) {
@@ -34,11 +32,32 @@ public class ScoreController {
         return Result.error("评分提交失败");
     }
     
+    @Operation(summary = "提交多维度评分")
+    @PostMapping("/multi")
+    public Result<Void> submitMultiScore(@Valid @RequestBody SubmitMultiScoreDTO dto) {
+        try {
+            if (scoreService.submitMultiScore(dto)) {
+                return Result.success("评分提交成功", null);
+            }
+            return Result.error("评分提交失败");
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
+        }
+    }
+    
     @Operation(summary = "获取考生的所有评分")
     @GetMapping("/candidate/{candidateId}")
     public Result<List<Map<String, Object>>> getCandidateScores(@PathVariable Long candidateId) {
         List<Map<String, Object>> scores = scoreService.getCandidateScores(candidateId);
         return Result.success(scores);
+    }
+    
+    @Operation(summary = "获取考生评分明细（含各评分项详情")
+    @GetMapping("/candidate/{candidateId}/details")
+    public Result<Map<String, Object>> getCandidateScoreDetails(
+            @PathVariable Long candidateId,
+            @RequestParam Long projectId) {
+        return Result.success(scoreService.getCandidateScoreDetails(candidateId, projectId));
     }
     
     @Operation(summary = "计算考生最终成绩")

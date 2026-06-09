@@ -3,48 +3,38 @@ package com.interview.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.io.Serializable;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
-/**
- * 考官评分实体
- */
 @Data
-@TableName("examiner_score")
-public class ExaminerScore implements Serializable {
+@TableName("score_item_template")
+public class ScoreItemTemplate implements Serializable {
     
     private static final long serialVersionUID = 1L;
     
     @TableId(type = IdType.AUTO)
     private Long id;
     
-    private Long projectId;
+    private String templateName;
     
-    private Long candidateId;
+    private String templateCode;
     
-    private Long examinerId;
+    private String description;
     
-    private Long roomId;
+    private Integer itemCount;
     
-    private Long scoreItemId;
-    
-    private BigDecimal score;
-    
-    private BigDecimal weightedScore;
-    
-    private BigDecimal totalScore;
-    
-    private String comment;
-    
-    private Integer isValid;
-    
-    private LocalDateTime submitTime;
+    private Integer isSystem;
     
     private Integer status;
+    
+    private Long createUserId;
     
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
     
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
+    
+    @TableField(exist = false)
+    private List<ScoreItemTemplateDetail> details;
 }

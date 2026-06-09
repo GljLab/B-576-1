@@ -141,7 +141,9 @@ const api = {
   // 评分相关
   scores: {
     submit: (data) => request.post('/scores', data),
+    submitMulti: (data) => request.post('/scores/multi', data),
     getCandidateScores: (candidateId) => request.get(`/scores/candidate/${candidateId}`),
+    getCandidateDetails: (candidateId, projectId) => request.get(`/scores/candidate/${candidateId}/details`, { params: { projectId } }),
     calculate: (candidateId, projectId) => request.post(`/scores/calculate/${candidateId}`, null, { params: { projectId } }),
     calculateAll: (projectId) => request.post('/scores/calculate-all', null, { params: { projectId } }),
     getFinal: (candidateId) => request.get(`/scores/final/${candidateId}`),
@@ -149,6 +151,31 @@ const api = {
     publish: (projectId) => request.post('/scores/publish', null, { params: { projectId } }),
     getStatistics: (projectId) => request.get('/scores/statistics', { params: { projectId } }),
     getRealtime: (candidateId, removeExtreme = true) => request.get(`/scores/realtime/${candidateId}`, { params: { removeExtreme } })
+  },
+
+  // 评分项管理
+  scoreItems: {
+    list: (projectId) => request.get(`/score-items/project/${projectId}`),
+    get: (id) => request.get(`/score-items/${id}`),
+    create: (data) => request.post('/score-items', data),
+    update: (id, data) => request.put(`/score-items/${id}`, data),
+    delete: (id) => request.delete(`/score-items/${id}`),
+    batchSave: (items) => request.post('/score-items/batch', items),
+    validateWeights: (projectId) => request.get(`/score-items/validate-weights/${projectId}`),
+    updateSort: (projectId, itemIds) => request.post(`/score-items/sort/${projectId}`, itemIds),
+    applyTemplate: (projectId, templateId, overwrite = false) => request.post(`/score-items/apply-template/${projectId}`, null, { params: { templateId, overwrite } }),
+    preview: (projectId) => request.get(`/score-items/preview/${projectId}`),
+    getStatistics: (projectId) => request.get(`/score-items/statistics/${projectId}`),
+    getCandidateScores: (candidateId, projectId) => request.get(`/score-items/candidate/${candidateId}`, { params: { projectId } })
+  },
+
+  // 评分模板管理
+  scoreTemplates: {
+    list: (isSystem) => request.get('/score-templates', { params: { isSystem } }),
+    get: (id) => request.get(`/score-templates/${id}`),
+    create: (data) => request.post('/score-templates', data),
+    update: (id, data) => request.put(`/score-templates/${id}`, data),
+    delete: (id) => request.delete(`/score-templates/${id}`)
   }
 }
 

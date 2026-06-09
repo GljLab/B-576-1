@@ -168,7 +168,43 @@ CREATE TABLE score_item (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='评分项目表';
 
 -- =============================================
--- 8. 考官评分表
+-- 8. 评分模板表
+-- =============================================
+DROP TABLE IF EXISTS score_item_template;
+CREATE TABLE score_item_template (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '模板ID',
+    template_name VARCHAR(100) NOT NULL COMMENT '模板名称',
+    template_code VARCHAR(50) UNIQUE COMMENT '模板编码',
+    description TEXT COMMENT '模板描述',
+    item_count INT DEFAULT 0 COMMENT '评分项数量',
+    is_system TINYINT DEFAULT 0 COMMENT '是否系统预置：0-否，1-是',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：0-禁用，1-启用',
+    create_user_id BIGINT COMMENT '创建人ID',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_template_code (template_code),
+    INDEX idx_is_system (is_system)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='评分模板表';
+
+-- =============================================
+-- 9. 评分模板详情表
+-- =============================================
+DROP TABLE IF EXISTS score_item_template_detail;
+CREATE TABLE score_item_template_detail (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '详情ID',
+    template_id BIGINT NOT NULL COMMENT '模板ID',
+    item_name VARCHAR(100) NOT NULL COMMENT '评分项名称',
+    item_code VARCHAR(50) COMMENT '评分项编码',
+    max_score DECIMAL(5,2) DEFAULT 100.00 COMMENT '满分值',
+    weight DECIMAL(5,2) DEFAULT 0.00 COMMENT '权重(%)',
+    description TEXT COMMENT '评分说明',
+    sort_order INT DEFAULT 0 COMMENT '排序',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX idx_template_id (template_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='评分模板详情表';
+
+-- =============================================
+-- 10. 考官评分表
 -- =============================================
 DROP TABLE IF EXISTS examiner_score;
 CREATE TABLE examiner_score (
@@ -177,23 +213,25 @@ CREATE TABLE examiner_score (
     candidate_id BIGINT NOT NULL COMMENT '考生ID',
     examiner_id BIGINT NOT NULL COMMENT '考官ID',
     room_id BIGINT COMMENT '考场ID',
-    score_item_id BIGINT COMMENT '评分项ID',
-    score DECIMAL(6,2) COMMENT '分数',
-    total_score DECIMAL(6,2) COMMENT '总分',
+    score_item_id BIGINT COMMENT '评分项ID（NULL表示汇总记录）',
+    score DECIMAL(6,2) COMMENT '分数（该评分项的原始分数）',
+    weighted_score DECIMAL(6,2) COMMENT '加权分数',
+    total_score DECIMAL(6,2) COMMENT '总分（汇总记录时使用）',
     comment TEXT COMMENT '评语',
     is_valid TINYINT DEFAULT 1 COMMENT '是否有效：0-无效（被去掉的最高/最低分），1-有效',
     submit_time DATETIME COMMENT '提交时间',
     status TINYINT NOT NULL DEFAULT 0 COMMENT '状态：0-未提交，1-已提交，2-已确认',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    UNIQUE KEY uk_candidate_examiner (candidate_id, examiner_id),
+    UNIQUE KEY uk_candidate_examiner_item (candidate_id, examiner_id, score_item_id),
     INDEX idx_project_id (project_id),
     INDEX idx_candidate_id (candidate_id),
-    INDEX idx_examiner_id (examiner_id)
+    INDEX idx_examiner_id (examiner_id),
+    INDEX idx_score_item_id (score_item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考官评分表';
 
 -- =============================================
--- 9. 考生最终成绩表
+-- 11. 考生最终成绩表
 -- =============================================
 DROP TABLE IF EXISTS final_score;
 CREATE TABLE final_score (
@@ -218,7 +256,7 @@ CREATE TABLE final_score (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考生最终成绩表';
 
 -- =============================================
--- 10. 抽签记录表
+-- 12. 抽签记录表
 -- =============================================
 DROP TABLE IF EXISTS draw_record;
 CREATE TABLE draw_record (
@@ -243,7 +281,7 @@ CREATE TABLE draw_record (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='抽签记录表';
 
 -- =============================================
--- 11. 操作日志表
+-- 13. 操作日志表
 -- =============================================
 DROP TABLE IF EXISTS operation_log;
 CREATE TABLE operation_log (
@@ -271,7 +309,7 @@ CREATE TABLE operation_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
 
 -- =============================================
--- 12. 系统配置表
+-- 14. 系统配置表
 -- =============================================
 DROP TABLE IF EXISTS sys_config;
 CREATE TABLE sys_config (
@@ -347,6 +385,50 @@ INSERT INTO score_item (project_id, item_name, item_code, max_score, weight, des
 (1, '应变能力', 'ITEM003', 100, 20, '考察考生在压力情境下的反应和处理能力', 3),
 (1, '计划组织协调能力', 'ITEM004', 100, 20, '考察考生组织、协调、计划的能力', 4),
 (1, '举止仪表', 'ITEM005', 100, 15, '考察考生的外在形象和行为举止', 5);
+
+-- 插入评分模板
+INSERT INTO score_item_template (template_name, template_code, description, item_count, is_system, status, create_user_id) VALUES
+('通用7项评分模板', 'TPL_7ITEM_GENERAL', '适用于各类结构化面试的通用7项评分体系', 7, 1, 1, 1),
+('简化5项评分模板', 'TPL_5ITEM_SIMPLE', '适用于快速面试的简化5项评分体系', 5, 1, 1, 1),
+('专业技术岗评分模板', 'TPL_TECHNICAL', '适用于专业技术岗位的6项评分体系', 6, 1, 1, 1),
+('管理岗评分模板', 'TPL_MANAGEMENT', '适用于管理岗位的7项评分体系', 7, 1, 1, 1);
+
+-- 插入通用7项评分模板详情
+INSERT INTO score_item_template_detail (template_id, item_name, item_code, max_score, weight, description, sort_order) VALUES
+(1, '综合分析能力', 'TPL_ANALYSIS', 100, 20, '考察考生对事物的分析、归纳、判断和推理能力', 1),
+(1, '言语表达能力', 'TPL_EXPRESSION', 100, 15, '考察考生语言表达的准确性、流畅性、逻辑性和感染力', 2),
+(1, '应变能力', 'TPL_ADAPTABILITY', 100, 15, '考察考生在压力和突发情况下的反应能力和情绪稳定性', 3),
+(1, '计划组织协调能力', 'TPL_PLANNING', 100, 15, '考察考生对活动的策划、组织、协调和资源调配能力', 4),
+(1, '人际交往意识与技巧', 'TPL_COMMUNICATION', 100, 15, '考察考生的人际沟通能力、团队合作意识和处理冲突的能力', 5),
+(1, '自我情绪控制', 'TPL_EMOTION', 100, 10, '考察考生在压力情境下的情绪管理和自我控制能力', 6),
+(1, '举止仪表', 'TPL_APPEARANCE', 100, 10, '考察考生的外在形象、着装礼仪和行为举止', 7);
+
+-- 插入简化5项评分模板详情
+INSERT INTO score_item_template_detail (template_id, item_name, item_code, max_score, weight, description, sort_order) VALUES
+(2, '综合分析能力', 'TPL_ANALYSIS', 100, 25, '考察考生对问题的分析、归纳、判断能力', 1),
+(2, '言语表达能力', 'TPL_EXPRESSION', 100, 20, '考察考生语言表达的准确性、流畅性、逻辑性', 2),
+(2, '应变能力', 'TPL_ADAPTABILITY', 100, 20, '考察考生在压力情境下的反应和处理能力', 3),
+(2, '计划组织协调能力', 'TPL_PLANNING', 100, 20, '考察考生组织、协调、计划的能力', 4),
+(2, '举止仪表', 'TPL_APPEARANCE', 100, 15, '考察考生的外在形象和行为举止', 5);
+
+-- 插入专业技术岗评分模板详情
+INSERT INTO score_item_template_detail (template_id, item_name, item_code, max_score, weight, description, sort_order) VALUES
+(3, '专业知识水平', 'TPL_TECH_KNOWLEDGE', 100, 25, '考察考生对本专业基础理论和专业知识的掌握程度', 1),
+(3, '专业实践能力', 'TPL_TECH_PRACTICE', 100, 25, '考察考生运用专业知识解决实际问题的能力', 2),
+(3, '综合分析能力', 'TPL_ANALYSIS', 100, 15, '考察考生对技术问题的分析和判断能力', 3),
+(3, '学习创新能力', 'TPL_INNOVATION', 100, 15, '考察考生的学习能力、创新意识和新技术应用能力', 4),
+(3, '言语表达能力', 'TPL_EXPRESSION', 100, 10, '考察考生技术沟通和方案阐述的表达能力', 5),
+(3, '举止仪表', 'TPL_APPEARANCE', 100, 10, '考察考生的外在形象和职业素养', 6);
+
+-- 插入管理岗评分模板详情
+INSERT INTO score_item_template_detail (template_id, item_name, item_code, max_score, weight, description, sort_order) VALUES
+(4, '综合分析能力', 'TPL_ANALYSIS', 100, 18, '考察考生对管理问题的分析、归纳、判断能力', 1),
+(4, '计划组织协调能力', 'TPL_PLANNING', 100, 18, '考察考生对工作的策划、组织、协调能力', 2),
+(4, '决策能力', 'TPL_DECISION', 100, 15, '考察考生在复杂情况下的决策能力和决策魄力', 3),
+(4, '领导与沟通能力', 'TPL_LEADERSHIP', 100, 15, '考察考生的领导力、团队管理和沟通协调能力', 4),
+(4, '应变能力', 'TPL_ADAPTABILITY', 100, 12, '考察考生在管理情境中的应变和危机处理能力', 5),
+(4, '言语表达能力', 'TPL_EXPRESSION', 100, 12, '考察考生的演讲、汇报和说服能力', 6),
+(4, '举止仪表', 'TPL_APPEARANCE', 100, 10, '考察考生的管理者形象和气质风度', 7);
 
 -- 插入系统配置
 INSERT INTO sys_config (config_key, config_value, config_type, description) VALUES
