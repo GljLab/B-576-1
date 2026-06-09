@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# 文档
+*.md
+!README.md
+
+# 日志
+logs
+*.log
+
+# 临时文件
+tmp
+temp
+
+# 测试
+**/test
+**/*test*
+**/*Test*
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Node - 前端
+frontend/node_modules
+frontend/dist
+frontend/.npm
+
+# Java - 后端
+backend/target
+backend/*.jar
+
+# Docker
+docker-compose*.yml
+Dockerfile*
